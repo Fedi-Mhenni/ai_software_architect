@@ -1,0 +1,32 @@
+{
+    "project_summary": "SaaS for restaurants to manage deliveries and online orders with AI recommendations",
+    "detected_project_type": "SaaS",
+    "complexity": "medium",
+    "questions": [
+        {
+            "category": "users",
+            "question": "Who are the primary users (restaurant owners, managers, or staff)?",
+            "importance": "high"
+        },
+        {
+            "category": "scale",
+            "question": "Expected number of restaurants and daily orders initially?",
+            "importance": "high"
+        },
+        {
+            "category": "data",
+            "question": "Will you have historical order data for personalization?",
+            "importance": "medium"
+        },
+        {
+            "category": "realtime",
+            "question": "Are real-time order status updates required?",
+            "importance": "medium"
+        },
+        {
+            "category": "security",
+            "question": "Any compliance requirements (PCI/DSS) for payments?",
+            "importance": "high"
+        }
+    ]
+}

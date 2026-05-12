@@ -50,7 +50,7 @@ class LLMRawResponse(BaseModel):
 class LLMParsedResponse(BaseModel):
     """Parsed LLM response when coercible to a Python object/dict."""
 
-    parsed: Dict[str, Any]
+    parsed: Any
 
 
 __all__ = [
