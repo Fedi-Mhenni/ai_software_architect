@@ -1,7 +1,7 @@
-"""LLM service abstraction for calling OpenAI or Groq (placeholder).
+"""LLM service abstraction for calling OpenAI, Google Gemini, or Groq (placeholder).
 
 Responsibilities:
-- select provider via env var `LLM_PROVIDER` ("openai" or "groq")
+- select provider via env var `LLM_PROVIDER` ("openai", "google", or "groq")
 - call provider API with retries and backoff
 - extract/parse JSON from LLM text responses
 - return raw and parsed wrappers
@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import logging
+import importlib
 import os
 import time
 from typing import Any, Dict, Optional, Tuple
@@ -23,14 +24,23 @@ try:
 except Exception:  # pragma: no cover - openai may not be installed in some environments
     OpenAI = None
 
-from schemas import LLMParsedResponse, LLMRawResponse
+try:
+    genai = importlib.import_module("google.genai")
+    genai_types = importlib.import_module("google.genai.types")
+except Exception:  # pragma: no cover - google may not be installed
+    genai = None
+    genai_types = None
+
+from schemas import ClarificationResponse, LLMParsedResponse, LLMRawResponse
 from utils.json_utils import extract_json_from_text
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_PROVIDER = os.getenv("LLM_PROVIDER", "openai")
+DEFAULT_PROVIDER = os.getenv("LLM_PROVIDER", "google")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+GOOGLE_MODEL = os.getenv("GOOGLE_MODEL", "gemini-2.5-flash")
 
 
 class LLMServiceError(RuntimeError):
@@ -42,10 +52,20 @@ class LLMService:
         self.provider = provider.lower()
         self.timeout = timeout
         self.openai_client = None
+        self.google_client = None
+        self.google_config = None
+        
         if self.provider == "openai":
             if OpenAI is None:
                 raise LLMServiceError("openai package is not installed")
             self.openai_client = OpenAI(api_key=OPENAI_API_KEY)
+        elif self.provider == "google":
+            if genai is None or genai_types is None:
+                raise LLMServiceError("google-genai package is not installed")
+            if not GOOGLE_API_KEY:
+                raise LLMServiceError("GOOGLE_API_KEY environment variable not set")
+            self.google_client = genai.Client(api_key=GOOGLE_API_KEY)
+            self.google_config = genai_types.GenerateContentConfig(max_output_tokens=1024, temperature=0.0)
 
     def _retry_loop(self, func, retries: int = 3, backoff: float = 1.0, *args, **kwargs):
         last_exc = None
@@ -66,6 +86,8 @@ class LLMService:
         """
         if self.provider == "openai":
             raw = self._retry_loop(self._call_openai, 3, 1.0, prompt, max_tokens, model)
+        elif self.provider == "google":
+            raw = self._retry_loop(self._call_google, 3, 1.0, prompt, max_tokens, model)
         elif self.provider == "groq":
             raw = self._retry_loop(self._call_groq, 3, 1.0, prompt, max_tokens, model)
         else:
@@ -110,6 +132,32 @@ class LLMService:
             return LLMRawResponse(raw_text=text, metadata={"provider": "openai", "model": model})
         except Exception as e:
             logger.exception("OpenAI call failed: %s", e)
+            raise
+
+    def _call_google(self, prompt: str, max_tokens: int, model: Optional[str]) -> LLMRawResponse:
+        if self.google_client is None:
+            raise LLMServiceError("google-genai is not configured")
+        model = model or GOOGLE_MODEL
+        logger.debug("Calling Google Gemini model=%s max_tokens=%s", model, max_tokens)
+        try:
+            if genai_types is None:
+                raise LLMServiceError("google-genai types are not available")
+            response = self.google_client.models.generate_content(
+                model=model,
+                contents=prompt,
+                config=genai_types.GenerateContentConfig(
+                    max_output_tokens=max_tokens,
+                    temperature=0.0,
+                    response_mime_type="application/json",
+                    response_schema=ClarificationResponse,
+                ),
+            )
+            text = getattr(response, "text", None)
+            if not text:
+                raise LLMServiceError("Empty response from Google Gemini")
+            return LLMRawResponse(raw_text=text, metadata={"provider": "google", "model": model})
+        except Exception as e:
+            logger.exception("Google Gemini call failed: %s", e)
             raise
 
     def _call_groq(self, prompt: str, max_tokens: int, model: Optional[str]) -> LLMRawResponse:
