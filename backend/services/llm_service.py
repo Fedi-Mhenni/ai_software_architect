@@ -20,9 +20,9 @@ from typing import Any, Dict, Optional, Tuple
 import httpx
 
 try:
-    import openai
+    from openai import OpenAI
 except Exception:  # pragma: no cover - openai may not be installed in some environments
-    openai = None
+    OpenAI = None
 
 from ..schemas import LLMParsedResponse, LLMRawResponse
 
@@ -41,10 +41,11 @@ class LLMService:
     def __init__(self, provider: str = DEFAULT_PROVIDER, timeout: int = 30):
         self.provider = provider.lower()
         self.timeout = timeout
+        self.openai_client = None
         if self.provider == "openai":
-            if openai is None:
+            if OpenAI is None:
                 raise LLMServiceError("openai package is not installed")
-            openai.api_key = OPENAI_API_KEY
+            self.openai_client = OpenAI(api_key=OPENAI_API_KEY)
 
     def _extract_json(self, text: str) -> Dict[str, Any]:
         """Try to extract JSON object from a text blob.
@@ -119,29 +120,27 @@ class LLMService:
         return raw, parsed
 
     def _call_openai(self, prompt: str, max_tokens: int, model: Optional[str]) -> LLMRawResponse:
-        if openai is None:
+        if self.openai_client is None:
             raise LLMServiceError("openai package is not available")
         model = model or os.getenv("OPENAI_MODEL", "gpt-4o-mini")
         logger.debug("Calling OpenAI model=%s max_tokens=%s", model, max_tokens)
         try:
-            # Using ChatCompletion API for structured prompting
-            response = openai.ChatCompletion.create(
+            response = self.openai_client.chat.completions.create(
                 model=model,
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=max_tokens,
                 temperature=0.0,
-                request_timeout=self.timeout,
+                timeout=self.timeout,
             )
             # Extract text
             text = None
-            if isinstance(response, dict):
-                # OpenAI library returns an object that behaves like dict in some envs
-                choices = response.get("choices")
-                if choices and len(choices) > 0:
-                    text = choices[0].get("message", {}).get("content") or choices[0].get("text")
-            else:
-                # Fallback attribute access
-                text = getattr(response.choices[0].message, "content", None) or getattr(response.choices[0], "text", None)
+            choices = getattr(response, "choices", None)
+            if choices and len(choices) > 0:
+                first_choice = choices[0]
+                message = getattr(first_choice, "message", None)
+                text = getattr(message, "content", None) if message else None
+                if not text:
+                    text = getattr(first_choice, "text", None)
 
             if not text:
                 raise LLMServiceError("Empty response from OpenAI")
