@@ -1,5 +1,16 @@
-version: '3.8'
 services:
-  app:
-    image: alpine:latest
-    command: ["sh", "-c", "echo 'Replace with your services' && sleep 3600"]
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "5001:5001"
+    volumes:
+      - ./backend:/app
+    environment:
+      - APP_PORT=5001
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5001/health').read()"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
