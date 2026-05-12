@@ -1,0 +1,5 @@
+version: '3.8'
+services:
+  app:
+    image: alpine:latest
+    command: ["sh", "-c", "echo 'Replace with your services' && sleep 3600"]
