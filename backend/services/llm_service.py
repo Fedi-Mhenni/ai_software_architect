@@ -24,7 +24,8 @@ try:
 except Exception:  # pragma: no cover - openai may not be installed in some environments
     OpenAI = None
 
-from ..schemas import LLMParsedResponse, LLMRawResponse
+from schemas import LLMParsedResponse, LLMRawResponse
+from utils.json_utils import extract_json_from_text
 
 logger = logging.getLogger(__name__)
 
@@ -46,44 +47,6 @@ class LLMService:
             if OpenAI is None:
                 raise LLMServiceError("openai package is not installed")
             self.openai_client = OpenAI(api_key=OPENAI_API_KEY)
-
-    def _extract_json(self, text: str) -> Dict[str, Any]:
-        """Try to extract JSON object from a text blob.
-
-        Strategy:
-        - Attempt direct json.loads(text)
-        - If fails, search for the first balanced { ... } or [ ... ] and parse
-        - If still fails, raise ValueError
-        """
-        # Try direct parse
-        try:
-            return json.loads(text)
-        except Exception:
-            pass
-
-        # Search for JSON object or array using simple bracket matching
-        # Find the first '{' or '[' and attempt to find the matching closing bracket.
-        start_match = re.search(r"[\[{]", text)
-        if not start_match:
-            raise ValueError("No JSON object or array found in text")
-
-        start = start_match.start()
-        stack = []
-        pairs = {"{": "}", "[": "]"}
-        for i in range(start, len(text)):
-            ch = text[i]
-            if ch in pairs:
-                stack.append(pairs[ch])
-            elif stack and ch == stack[-1]:
-                stack.pop()
-                if not stack:
-                    candidate = text[start : i + 1]
-                    try:
-                        return json.loads(candidate)
-                    except Exception:
-                        # continue searching if parsing fails
-                        pass
-        raise ValueError("Could not extract valid JSON from text")
 
     def _retry_loop(self, func, retries: int = 3, backoff: float = 1.0, *args, **kwargs):
         last_exc = None
@@ -111,7 +74,7 @@ class LLMService:
 
         parsed = None
         try:
-            parsed_json = self._extract_json(raw.raw_text)
+            parsed_json = extract_json_from_text(raw.raw_text)
             parsed = LLMParsedResponse(parsed=parsed_json)
         except Exception as e:
             logger.debug("Failed to parse JSON from LLM raw response: %s", e)
